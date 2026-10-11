@@ -29,6 +29,7 @@ pixi run record                    # → recordings/<date_time>/
 pixi run record --view my_scan     # record and view
 pixi run record --duration 30      # stop by itself after 30 s
 pixi run ios-install               # build, install and launch the app on the USB iPhone
+pixi run ios-launch                # bring the installed app to the foreground on the USB iPhone
 pixi run ios-build                 # compile-check the iOS app (unsigned)
 ```
 
@@ -44,6 +45,9 @@ with ARStreamClient.usb() as client:
         frame.timestamp        # seconds, phone clock
         frame.tracking         # "normal" when ARKit's pose is reliable
 ```
+
+The app only listens while it is in the foreground on an unlocked phone (iOS suspends it otherwise,
+and connections are refused). Over USB, `pixi run ios-launch` brings it to the front from the Mac.
 
 ## Wi-Fi notes
 - Phone and Mac must be on the same network, and ARStream needs Local Network access

@@ -10,6 +10,8 @@ view = "arstream view"
 record = "arstream record"
 # Build, sign, install and launch the app on the USB-connected iPhone.
 ios-install = "sh ios/install.sh"
+# Bring the (installed) app to the foreground on the USB-connected iPhone: iOS suspends its listener otherwise.
+ios-launch = "sh ios/launch.sh"
 # Compile-check the iOS app without signing.
 ios-build = "xcodebuild -project ios/ARStream/ARStream.xcodeproj -target ARStream -sdk iphoneos -configuration Debug CODE_SIGNING_ALLOWED=NO -quiet build SYMROOT=$PIXI_PROJECT_ROOT/build/ios"
 
