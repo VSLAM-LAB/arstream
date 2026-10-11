@@ -1,0 +1,322 @@
+<title>ARStream Pipeline</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: single reading column; diagrams break out wider; phone = blue, Mac = green, wire = amber throughout */
+:root {
+  --bg: #f6f7f9;
+  --surface: #ffffff;
+  --fg: #1b2230;
+  --muted: #5b6577;
+  --line: #d9dee7;
+  --phone: #2f6fdb;
+  --phone-soft: #e6eefc;
+  --mac: #1f8a5b;
+  --mac-soft: #e3f4ec;
+  --wire: #b86e00;
+  --wire-soft: #fbf0de;
+  --code-bg: #eef1f5;
+  --font-body: "Instrument Sans", "Helvetica Neue", Arial, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #11151c; --surface: #181e27; --fg: #e4e8ef; --muted: #98a2b3; --line: #2b3340;
+    --phone: #78a6f5; --phone-soft: #1a2840; --mac: #5cc79a; --mac-soft: #15302a;
+    --wire: #f0a93a; --wire-soft: #33270f; --code-bg: #1f2632; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #11151c; --surface: #181e27; --fg: #e4e8ef; --muted: #98a2b3; --line: #2b3340;
+  --phone: #78a6f5; --phone-soft: #1a2840; --mac: #5cc79a; --mac-soft: #15302a;
+  --wire: #f0a93a; --wire-soft: #33270f; --code-bg: #1f2632; color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+body {
+  background: var(--bg); color: var(--fg);
+  font-family: var(--font-body); font-size: 16px; line-height: 1.6;
+  padding-inline: 20px; padding-block: 40px 80px;
+}
+main { max-width: 860px; margin: 0 auto; display: flex; flex-direction: column; gap: 56px; }
+section { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+h1, h2, h3 { line-height: 1.2; text-wrap: balance; margin: 0; }
+h1 { font-size: 2.3rem; font-weight: 700; letter-spacing: -0.02em; }
+h2 { font-size: 1.5rem; font-weight: 650; letter-spacing: -0.01em; }
+h3 { font-size: 1.05rem; font-weight: 600; }
+p { margin: 0; max-width: 68ch; }
+.lede { font-size: 1.15rem; color: var(--muted); }
+.eyebrow { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.1em; font-weight: 600; color: var(--muted); }
+code, .mono { font-family: var(--font-mono); font-size: 0.86em; }
+code { background: var(--code-bg); padding: 0.1em 0.35em; border-radius: 4px; }
+pre { margin: 0; background: var(--code-bg); border-radius: 8px; padding: 14px 16px; overflow-x: auto; font-size: 0.9rem; line-height: 1.55; }
+pre code { background: none; padding: 0; }
+a { color: var(--phone); }
+ul { margin: 0; padding-left: 1.2em; display: flex; flex-direction: column; gap: 6px; }
+
+.tag { display: inline-block; font-size: 0.72rem; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; padding: 2px 8px; border-radius: 999px; }
+.tag.phone { background: var(--phone-soft); color: var(--phone); }
+.tag.mac { background: var(--mac-soft); color: var(--mac); }
+.tag.wire { background: var(--wire-soft); color: var(--wire); }
+
+/* Architecture diagram */
+.arch { display: grid; grid-template-columns: 1fr auto 1fr; gap: 16px; align-items: stretch; }
+.side { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 18px; display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.side.phone { border-top: 4px solid var(--phone); }
+.side.mac { border-top: 4px solid var(--mac); }
+.side h3 { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.box { border-radius: 8px; padding: 10px 12px; font-size: 0.92rem; line-height: 1.4; }
+.side.phone .box { background: var(--phone-soft); }
+.side.mac .box { background: var(--mac-soft); }
+.box b { display: block; font-family: var(--font-mono); font-size: 0.82rem; font-weight: 500; }
+.down { text-align: center; color: var(--muted); font-size: 0.9rem; line-height: 1; }
+.links { display: flex; flex-direction: column; justify-content: center; gap: 14px; min-width: 150px; }
+.link { border: 2px dashed var(--wire); border-radius: 10px; padding: 10px 12px; background: var(--wire-soft); text-align: center; font-size: 0.88rem; line-height: 1.35; }
+.link strong { color: var(--wire); display: block; font-size: 0.95rem; }
+.arrow { color: var(--wire); font-size: 1.4rem; text-align: center; line-height: 1; }
+@media (max-width: 700px) {
+  .arch { grid-template-columns: 1fr; }
+  .links { flex-direction: row; flex-wrap: wrap; justify-content: center; }
+  .links .arrow { transform: rotate(90deg); }
+}
+
+/* Steps */
+.steps { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 0; counter-reset: step; }
+.steps li { display: grid; grid-template-columns: 34px 1fr; gap: 14px; padding: 12px 0; border-bottom: 1px solid var(--line); counter-increment: step; }
+.steps li:last-child { border-bottom: none; }
+.steps li::before { content: counter(step); font-family: var(--font-mono); font-weight: 500; width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; font-size: 0.85rem; background: var(--code-bg); color: var(--fg); }
+.steps li > div { min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+
+/* Byte layout */
+.bytes { display: flex; border-radius: 8px; overflow: hidden; border: 1px solid var(--line); min-width: 560px; }
+.bytes div { padding: 10px 8px; font-size: 0.8rem; text-align: center; border-right: 1px solid var(--line); line-height: 1.3; }
+.bytes div:last-child { border-right: none; }
+.bytes .mono { display: block; font-weight: 500; font-size: 0.82rem; }
+.bytes small { color: var(--muted); }
+.b-fix { background: var(--wire-soft); flex: 0 0 auto; }
+.b-json { background: var(--phone-soft); flex: 2; }
+.b-jpeg { background: var(--mac-soft); flex: 4; }
+.scroll { overflow-x: auto; }
+
+/* Tables */
+table { border-collapse: collapse; width: 100%; font-size: 0.92rem; }
+th, td { text-align: left; padding: 9px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); font-weight: 600; }
+td:first-child { white-space: nowrap; }
+.table-wrap { overflow-x: auto; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; }
+.table-wrap table th:first-child, .table-wrap table td:first-child { padding-left: 14px; }
+
+.two { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.two > * { min-width: 0; }
+@media (max-width: 700px) { .two { grid-template-columns: 1fr; } }
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 16px; display: flex; flex-direction: column; gap: 8px; }
+
+.stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; }
+.stat { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 14px; }
+.stat .v { font-size: 1.5rem; font-weight: 650; font-variant-numeric: tabular-nums; }
+.stat .k { font-size: 0.85rem; color: var(--muted); }
+
+.axes { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+@media (max-width: 600px) { .axes { grid-template-columns: 1fr; } }
+</style>
+
+<main>
+  <header style="display:flex;flex-direction:column;gap:12px">
+    <span class="eyebrow">3d_reconstruction_test · iPhone → Mac</span>
+    <h1>ARStream pipeline</h1>
+    <p class="lede">How the iPhone app captures camera frames and poses with ARKit, how they travel to the Mac over USB or Wi-Fi, and what the Mac does with them.</p>
+  </header>
+
+  <section>
+    <h2>The big picture</h2>
+    <p>The <span class="tag phone">phone</span> runs a small app that acts as a <em>server</em>: it tracks its own motion with ARKit and pushes every camera frame out on TCP port 5555. The <span class="tag mac">Mac</span> is the <em>client</em>: it connects to that port, either through the USB cable or over Wi-Fi, and receives a stream of frames, each with its image, camera intrinsics, pose and timestamp.</p>
+
+    <div class="arch" role="img" aria-label="Architecture: iPhone app components on the left, USB and Wi-Fi links in the middle, Mac components on the right">
+      <div class="side phone">
+        <h3>iPhone 15 <span class="tag phone">Swift app</span></h3>
+        <div class="box"><b>ARKit session</b>Rear camera + IMU → image, pose, intrinsics, 60 Hz</div>
+        <div class="down">↓</div>
+        <div class="box"><b>FrameStreamer.swift</b>Resize, JPEG-encode, attach JSON header</div>
+        <div class="down">↓</div>
+        <div class="box"><b>StreamServer.swift</b>TCP server on port 5555, announced via Bonjour</div>
+        <div class="box"><b>ContentView.swift</b>Camera preview, status, settings</div>
+      </div>
+
+      <div class="links">
+        <div class="arrow" aria-hidden="true">⇄</div>
+        <div class="link"><strong>USB cable</strong>TCP tunnelled by macOS usbmuxd<br><span class="mono">30 fps</span></div>
+        <div class="link"><strong>Wi-Fi</strong>Plain TCP, found by Bonjour<br><span class="mono">~23 fps</span></div>
+        <div class="arrow" aria-hidden="true">⇄</div>
+      </div>
+
+      <div class="side mac">
+        <h3>Mac <span class="tag mac">Python</span></h3>
+        <div class="box"><b>usbmux.py · discovery.py</b>Open the connection (USB or Wi-Fi)</div>
+        <div class="down">↓</div>
+        <div class="box"><b>client.py</b>Read messages → <code>Frame</code> objects</div>
+        <div class="down">↓</div>
+        <div class="box"><b>cli.py → rerun viewer</b>Live 3D view of camera and path</div>
+        <div class="box"><b>recorder.py</b>Save to <code>recordings/</code> on disk</div>
+        <div class="box"><b>your VSLAM code</b>Iterate over frames in Python (C++ next)</div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>What runs on the phone</h2>
+    <p>A single-screen SwiftUI app in <code>ios/ARStream/</code>. You install it once with <code>pixi run ios-install</code> (or ⌘R in Xcode) and then just open it.</p>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>File</th><th>What it does</th></tr></thead>
+        <tbody>
+          <tr><td><code>ARStreamApp.swift</code></td><td>App entry point; shows the main screen.</td></tr>
+          <tr><td><code>ContentView.swift</code></td><td>Starts the ARKit session (gravity-aligned world, autofocus off by default). Shows the camera preview, connection status, Wi-Fi address, fps, bandwidth and tracking state. Lets you pick resolution (1920×1440, 960×720, 640×480), max fps (10/30/60) and autofocus.</td></tr>
+          <tr><td><code>FrameStreamer.swift</code></td><td>Receives every ARKit frame. If a client is connected and the previous frame has finished sending, it downsizes the image, JPEG-encodes it on the GPU, rescales the intrinsics to match, and packs everything into one message. Frames that arrive while one is still in flight are dropped, so latency stays low on a slow link.</td></tr>
+          <tr><td><code>StreamServer.swift</code></td><td>TCP server on port 5555 using Apple's Network framework. Accepts one client at a time (a new client replaces the old one). Advertises itself on Wi-Fi as <code>_arstream._tcp</code> via Bonjour.</td></tr>
+          <tr><td><code>Info.plist</code> + project</td><td>Permissions: camera, local network, Bonjour service name. Keeps the screen awake.</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p><strong>Where the pose comes from:</strong> ARKit's visual-inertial odometry, which fuses the rear camera with the phone's IMU. It works on any recent iPhone without LiDAR. ARKit runs at 60 Hz; the app sends at the chosen max fps.</p>
+  </section>
+
+  <section>
+    <h2>What runs on the Mac</h2>
+    <p>A Python package in <code>python/arstream/</code>, installed into the pixi environment. Dependencies: numpy, OpenCV (JPEG decoding), rerun (3D viewer) and zeroconf (Bonjour).</p>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>File</th><th>What it does</th></tr></thead>
+        <tbody>
+          <tr><td><code>usbmux.py</code></td><td>Talks to <code>usbmuxd</code>, the system service macOS already uses to talk to iPhones over USB. Asks it to open a TCP connection to port 5555 on the phone. No extra tools (iproxy, libimobiledevice) needed.</td></tr>
+          <tr><td><code>discovery.py</code></td><td>For Wi-Fi: browses Bonjour for <code>_arstream._tcp</code> and returns the phone's IP. Only looks on the Mac's Wi-Fi/LAN interface, so a plugged-in cable doesn't confuse it.</td></tr>
+          <tr><td><code>client.py</code></td><td><code>ARStreamClient</code>: reads messages off the socket and turns each into a <code>Frame</code>. Converts the pose from ARKit's camera axes to OpenCV's.</td></tr>
+          <tr><td><code>recorder.py</code></td><td>Writes frames to disk in a TUM-RGB-D-style layout (see below).</td></tr>
+          <tr><td><code>cli.py</code></td><td>The <code>arstream view</code> and <code>arstream record</code> commands.</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section>
+    <h2>One frame's journey</h2>
+    <ol class="steps">
+      <li><div><h3><span class="tag phone">phone</span> ARKit produces a frame</h3><p>A 1920×1440 camera image plus the camera's pose in the world, its intrinsics and a timestamp, all from the same instant.</p></div></li>
+      <li><div><h3><span class="tag phone">phone</span> Encode</h3><p>Resized (default 960×720) and JPEG-encoded at quality 0.8, about 60 kB. Intrinsics are rescaled to the new size.</p></div></li>
+      <li><div><h3><span class="tag phone">phone</span> Package</h3><p>A JSON header with the metadata is put in front of the JPEG, with a small fixed-size prefix that says how long each part is.</p></div></li>
+      <li><div><h3><span class="tag wire">link</span> Send</h3><p>Written to the TCP connection. Over USB, usbmuxd carries it through the cable; over Wi-Fi it goes through the router.</p></div></li>
+      <li><div><h3><span class="tag mac">Mac</span> Receive and parse</h3><p><code>client.py</code> reads the prefix, then exactly that many header and JPEG bytes, and builds a <code>Frame</code>. The JPEG is only decoded when you access <code>frame.image</code>.</p></div></li>
+      <li><div><h3><span class="tag mac">Mac</span> Use</h3><p>The viewer draws it in rerun, the recorder writes it to disk, or your code feeds it to SLAM.</p></div></li>
+    </ol>
+  </section>
+
+  <section>
+    <h2>Communication protocols</h2>
+    <p>There are three layers. The bottom one depends on the connection type; the top one is the same for both.</p>
+
+    <div class="two">
+      <div class="card">
+        <h3><span class="tag wire">USB</span> usbmuxd tunnel</h3>
+        <p>macOS's <code>usbmuxd</code> listens on the local socket <code>/var/run/usbmuxd</code>. The Mac sends it a small "Connect to device X, port 5555" request (a binary header plus an XML plist). After it replies OK, the same socket becomes a plain pipe to the phone's TCP server, carried over the cable.</p>
+      </div>
+      <div class="card">
+        <h3><span class="tag wire">Wi-Fi</span> Bonjour + TCP</h3>
+        <p>The phone announces <code>_arstream._tcp</code> using Bonjour (multicast DNS), the same mechanism AirPrint and AirPlay use. The Mac asks "who offers this service?" and gets the phone's IP and port, then opens a normal TCP connection. Both devices must be on the same network.</p>
+      </div>
+    </div>
+
+    <h3>The ARStream message (same for USB and Wi-Fi)</h3>
+    <p>Each frame is one message. The phone only sends; the Mac never writes anything back. Integers are little-endian.</p>
+    <div class="scroll">
+      <div class="bytes">
+        <div class="b-fix"><span class="mono">"ARS1"</span><small>4 bytes<br>magic</small></div>
+        <div class="b-fix"><span class="mono">u32</span><small>4 bytes<br>header length</small></div>
+        <div class="b-fix"><span class="mono">u32</span><small>4 bytes<br>JPEG length</small></div>
+        <div class="b-json"><span class="mono">JSON header</span><small>~0.5 kB · metadata</small></div>
+        <div class="b-jpeg"><span class="mono">JPEG image</span><small>~60 kB at 960×720</small></div>
+      </div>
+    </div>
+    <p>The magic bytes let the Mac detect if it ever loses its place in the stream. The JSON header looks like this:</p>
+<pre><code>{
+  "seq": 1234,                      // frame counter
+  "timestamp": 99638.308,           // seconds since phone boot (same clock as the IMU)
+  "width": 960, "height": 720,      // size of the JPEG
+  "K": [722.4, 0, 481.5,            // 3×3 intrinsics for this JPEG, row-major
+        0, 722.4, 358.9,
+        0, 0, 1],
+  "T_world_camera": [ … 16 … ],     // 4×4 camera-to-world pose, row-major, ARKit axes
+  "tracking": "normal",             // or limited_initializing, limited_excessive_motion, …
+  "exposure_duration": 0.01         // seconds
+}</code></pre>
+  </section>
+
+  <section>
+    <h2>Coordinate conventions</h2>
+    <p>ARKit and OpenCV disagree on which way a camera looks. The phone sends ARKit's raw pose; <code>client.py</code> converts it to the OpenCV convention most SLAM code expects by flipping the camera's y and z axes.</p>
+    <div class="axes">
+      <div class="card"><h3>World frame</h3><p>ARKit's: gravity-aligned, <strong>y points up</strong>, origin where the app started tracking. Units are metres.</p></div>
+      <div class="card"><h3>Camera (ARKit)</h3><p>x right, <strong>y up</strong>, <strong>z backward</strong> (out of the screen towards you). Kept in <code>frame.header</code>.</p></div>
+      <div class="card"><h3>Camera (OpenCV)</h3><p>x right, <strong>y down</strong>, <strong>z forward</strong>. This is <code>frame.T_world_camera</code>.</p></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Commands</h2>
+    <p>Run from the project folder. Every command uses the pixi environment, so there is nothing to activate first.</p>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Command</th><th>What it does</th></tr></thead>
+        <tbody>
+          <tr><td><code>pixi run view</code></td><td>Connect over USB and open the live 3D viewer.</td></tr>
+          <tr><td><code>pixi run view --wifi</code></td><td>Same, finding the phone on Wi-Fi automatically.</td></tr>
+          <tr><td><code>pixi run view --host 192.168.1.102</code></td><td>Wi-Fi with an explicit IP (shown in the app).</td></tr>
+          <tr><td><code>pixi run record</code></td><td>Save to <code>recordings/&lt;date_time&gt;/</code> until Ctrl-C. Add <code>--view</code> to watch at the same time, or give a folder name.</td></tr>
+          <tr><td><code>pixi run ios-install</code></td><td>Build, sign, install and launch the app on the plugged-in iPhone (<code>ios/install.sh</code>).</td></tr>
+          <tr><td><code>pixi run ios-build</code></td><td>Compile-check the app without signing.</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>Using it from your own Python code</h3>
+<pre><code>from arstream import ARStreamClient
+
+with ARStreamClient.usb() as client:          # or ARStreamClient.tcp("192.168.1.102")
+    for frame in client:
+        frame.image            # BGR uint8 numpy array (H×W×3)
+        frame.K                # 3×3 intrinsics for frame.image
+        frame.T_world_camera   # 4×4 camera-to-world, OpenCV camera axes
+        frame.timestamp        # seconds, phone clock
+        frame.tracking         # "normal" when ARKit's pose is reliable</code></pre>
+  </section>
+
+  <section>
+    <h2>What a recording contains</h2>
+<pre><code>recordings/20261009_103000/
+├── rgb/99638.308000.jpg …   original JPEGs from the phone, named by timestamp (not re-encoded)
+├── rgb.txt                  timestamp → image file, TUM format
+├── arkit_poses.txt          timestamp tx ty tz qx qy qz qw, TUM trajectory format
+└── frames.jsonl             one line per frame with the full header (intrinsics, tracking, …)</code></pre>
+    <p>The TUM format means most SLAM tools and evaluation scripts (for example <code>evo</code>) can read it directly. ARKit's poses serve as a reference trajectory to compare your VSLAM against.</p>
+  </section>
+
+  <section>
+    <h2>Measured so far</h2>
+    <div class="stats">
+      <div class="stat"><div class="v">30.1 fps</div><div class="k">USB, 960×720</div></div>
+      <div class="stat"><div class="v">23.4 fps</div><div class="k">Wi-Fi, 960×720</div></div>
+      <div class="stat"><div class="v">~62 kB</div><div class="k">per JPEG frame</div></div>
+      <div class="stat"><div class="v">~15 Mbit/s</div><div class="k">at 30 fps</div></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Limits and next steps</h2>
+    <ul>
+      <li><strong>No depth yet.</strong> The iPhone 15 has no LiDAR. A LiDAR iPhone would add a depth map to the same message.</li>
+      <li><strong>Bluetooth is not an option.</strong> iOS apps only get Bluetooth Low Energy, far below the ~15 Mbit/s the stream needs.</li>
+      <li><strong>Campus Wi-Fi</strong> (eduroam) usually blocks device-to-device traffic. Use the phone's Personal Hotspot instead.</li>
+      <li><strong>Free Apple ID signing</strong> expires after 7 days; re-run <code>pixi run ios-install</code>.</li>
+      <li><strong>Possible next steps:</strong> a C++ client with the same API, raw IMU data in the stream, and running a VSLAM such as ORB-SLAM3 against ARKit's poses.</li>
+    </ul>
+  </section>
+</main>

@@ -1,0 +1,9 @@
+# pixi environments
+.pixi/*
+!.pixi/config.toml
+build/
+recordings/
+xcuserdata/
+*.xcuserstate
+__pycache__/
+.DS_Store

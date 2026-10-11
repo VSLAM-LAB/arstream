@@ -1,0 +1,24 @@
+[workspace]
+channels = ["conda-forge"]
+name = "arstream"
+# USB (usbmuxd) and the ios-* tasks need macOS; Wi-Fi streaming works from either platform.
+platforms = ["osx-arm64", "linux-64"]
+version = "0.1.0"
+
+[tasks]
+view = "arstream view"
+record = "arstream record"
+# Build, sign, install and launch the app on the USB-connected iPhone.
+ios-install = "sh ios/install.sh"
+# Compile-check the iOS app without signing.
+ios-build = "xcodebuild -project ios/ARStream/ARStream.xcodeproj -target ARStream -sdk iphoneos -configuration Debug CODE_SIGNING_ALLOWED=NO -quiet build SYMROOT=$PIXI_PROJECT_ROOT/build/ios"
+
+[dependencies]
+python = "3.12.*"
+numpy = "*"
+opencv = "*"
+rerun-sdk = "*"
+zeroconf = ">=0.151.5,<0.152"
+
+[pypi-dependencies]
+arstream = { path = "python", editable = true }
