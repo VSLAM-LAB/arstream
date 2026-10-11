@@ -8,6 +8,7 @@ import numpy as np
 
 from .client import DEFAULT_PORT, ARStreamClient, Frame
 from .recorder import Recorder
+from .usbmux import UsbmuxError
 
 
 def open_client(args) -> ARStreamClient:
@@ -21,11 +22,14 @@ def open_client(args) -> ARStreamClient:
         if len(services) > 1:
             print("Several phones found, using the first:", [s.name for s in services])
         args.host, args.port = services[0].host, services[0].port
-    if args.host:
-        print(f"Connecting to {args.host}:{args.port} over Wi-Fi…")
-        return ARStreamClient.tcp(args.host, args.port)
-    print(f"Connecting to port {args.port} over USB…")
-    return ARStreamClient.usb(args.port, args.serial)
+    try:
+        if args.host:
+            print(f"Connecting to {args.host}:{args.port} over Wi-Fi…")
+            return ARStreamClient.tcp(args.host, args.port)
+        print(f"Connecting to port {args.port} over USB…")
+        return ARStreamClient.usb(args.port, args.serial)
+    except (UsbmuxError, OSError) as e:
+        raise SystemExit(f"Could not connect to the phone: {e}") from None
 
 
 class RateMeter:
