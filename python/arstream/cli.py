@@ -1,4 +1,4 @@
-"""Command line entry point: `arstream view` and `arstream record OUT_DIR`."""
+"""Command line entry point: `arstream view`, `arstream record OUT_DIR` and `arstream publish`."""
 
 import argparse
 import time
@@ -7,7 +7,9 @@ from datetime import datetime
 import numpy as np
 
 from .client import DEFAULT_PORT, ARStreamClient, Frame
+from .publisher import DEFAULT_BIND, DEFAULT_URL, Publisher, first_frame_header, write_vslamlab_calibration
 from .recorder import Recorder
+from .subscriber import Subscriber
 from .usbmux import UsbmuxError
 
 
@@ -30,6 +32,14 @@ def open_client(args) -> ARStreamClient:
         return ARStreamClient.usb(args.port, args.serial)
     except (UsbmuxError, OSError) as e:
         raise SystemExit(f"Could not connect to the phone: {e}") from None
+
+
+def open_source(args):
+    """Frames from the phone (default) or from a relay (--sub URL)."""
+    if args.sub:
+        print(f"Subscribing to {args.sub}…")
+        return Subscriber(args.sub)
+    return open_client(args)
 
 
 class RateMeter:
@@ -84,8 +94,8 @@ class RerunLogger:
 def cmd_view(args):
     logger = RerunLogger()
     meter = RateMeter()
-    with open_client(args) as client:
-        for frame in client:
+    with open_source(args) as source:
+        for frame in source:
             logger.log(frame)
             if (fps := meter.tick()) is not None:
                 print(status_line(frame, fps))
@@ -96,12 +106,12 @@ def cmd_record(args):
     out_dir = args.out_dir or f"recordings/{datetime.now():%Y%m%d_%H%M%S}"
     logger = RerunLogger() if args.view else None
     meter = RateMeter()
-    with open_client(args) as client, Recorder(out_dir) as recorder:
+    with open_source(args) as source, Recorder(out_dir) as recorder:
         stop = f"{args.duration:g} s" if args.duration else "Ctrl-C"
         print(f"Recording to {out_dir} (stops after {stop})")
         start = time.monotonic()
         try:
-            for frame in client:
+            for frame in source:
                 recorder.write(frame)
                 if logger:
                     logger.log(frame)
@@ -114,23 +124,59 @@ def cmd_record(args):
     print(f"Saved {recorder.count} frames to {out_dir}")
 
 
+def cmd_publish(args):
+    meter = RateMeter()
+    count = 0
+    with open_client(args) as client, Publisher(args.bind) as publisher:
+        stop = f"{args.duration:g} s" if args.duration else "Ctrl-C"
+        print(f"Publishing on {args.bind} (stops after {stop})")
+        start = time.monotonic()
+        try:
+            for message in client.messages():
+                if count == 0 and args.calibration_yaml:
+                    write_vslamlab_calibration(args.calibration_yaml, first_frame_header(message), args.fps)
+                    print(f"Wrote {args.calibration_yaml}")
+                publisher.publish(message)
+                count += 1
+                if (fps := meter.tick()) is not None:
+                    print(f"[{count} frames] {fps:5.1f} fps published")
+                if args.duration and time.monotonic() - start >= args.duration:
+                    break
+        except KeyboardInterrupt:
+            pass
+        finally:
+            publisher.publish_end()
+    print(f"Published {count} frames, end of stream sent.")
+
+
 def main():
     parser = argparse.ArgumentParser(prog="arstream", description=__doc__)
-    common = argparse.ArgumentParser(add_help=False)
-    common.add_argument("--wifi", action="store_true", help="find the phone on Wi-Fi via Bonjour (default: USB)")
-    common.add_argument("--host", help="phone IP for Wi-Fi")
-    common.add_argument("--port", type=int, default=DEFAULT_PORT)
-    common.add_argument("--serial", help="device serial/UDID if several phones are plugged in")
+    phone = argparse.ArgumentParser(add_help=False)
+    phone.add_argument("--wifi", action="store_true", help="find the phone on Wi-Fi via Bonjour (default: USB)")
+    phone.add_argument("--host", help="phone IP for Wi-Fi")
+    phone.add_argument("--port", type=int, default=DEFAULT_PORT)
+    phone.add_argument("--serial", help="device serial/UDID if several phones are plugged in")
+    source = argparse.ArgumentParser(add_help=False, parents=[phone])
+    source.add_argument("--sub", nargs="?", const=DEFAULT_URL, metavar="URL",
+                        help=f"read from a relay (`arstream publish`) instead of the phone (default URL {DEFAULT_URL})")
     sub = parser.add_subparsers(dest="command", required=True)
 
-    p = sub.add_parser("view", parents=[common], help="live 3D view in rerun")
+    p = sub.add_parser("view", parents=[source], help="live 3D view in rerun")
     p.set_defaults(func=cmd_view)
 
-    p = sub.add_parser("record", parents=[common], help="record to disk")
+    p = sub.add_parser("record", parents=[source], help="record to disk")
     p.add_argument("out_dir", nargs="?", help="default: recordings/<date_time>")
     p.add_argument("--view", action="store_true", help="also show the rerun viewer")
     p.add_argument("--duration", type=float, help="stop after this many seconds (default: until Ctrl-C)")
     p.set_defaults(func=cmd_record)
+
+    p = sub.add_parser("publish", parents=[phone], help="relay the phone's stream to ZeroMQ subscribers")
+    p.add_argument("--bind", default=DEFAULT_BIND, help=f"ZeroMQ PUB endpoint (default {DEFAULT_BIND})")
+    p.add_argument("--calibration-yaml", metavar="PATH",
+                   help="write a VSLAM-LAB calibration.yaml from the first frame before publishing it")
+    p.add_argument("--fps", type=float, default=30.0, help="nominal frame rate written to the calibration (default 30)")
+    p.add_argument("--duration", type=float, help="stop after this many seconds (default: until Ctrl-C)")
+    p.set_defaults(func=cmd_publish)
 
     args = parser.parse_args()
     try:

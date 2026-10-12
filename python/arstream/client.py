@@ -1,4 +1,10 @@
-"""Receives frames streamed by the ARStream iOS app (see FrameStreamer.swift for the format)."""
+"""Receives frames streamed by the ARStream iOS app (see FrameStreamer.swift for the format).
+
+The ARS1 message is the one schema on every leg: phone -> Mac (this client), Mac -> subscribers
+(publisher.py / subscriber.py, one ZeroMQ message per ARS1 message, bytes untouched) and the
+recording's frames.jsonl (one header per line). A message whose header carries "event" (e.g.
+{"event": "end"}, empty payload) is a control message, not a frame.
+"""
 
 import json
 import socket
@@ -13,6 +19,8 @@ from . import usbmux
 
 DEFAULT_PORT = 5555
 MAGIC = b"ARS1"
+HEADER_STRUCT = struct.Struct("<4sII")  # magic, header_len, payload_len
+END_EVENT = "end"
 
 # ARKit cameras look down -z with y up; OpenCV cameras look down +z with y down.
 ARKIT_TO_OPENCV = np.diag([1.0, -1.0, -1.0, 1.0])
@@ -40,6 +48,29 @@ class Frame:
     @property
     def height(self) -> int:
         return self.header["height"]
+
+
+def encode_message(header: dict, payload: bytes = b"") -> bytes:
+    header_bytes = json.dumps(header).encode()
+    return HEADER_STRUCT.pack(MAGIC, len(header_bytes), len(payload)) + header_bytes + payload
+
+
+def decode_message(raw: bytes) -> tuple[dict, bytes]:
+    """(header, payload) of one ARS1 message held in memory."""
+    if len(raw) < HEADER_STRUCT.size:
+        raise ValueError(f"message of {len(raw)} bytes is shorter than the ARS1 prefix")
+    magic, header_len, payload_len = HEADER_STRUCT.unpack_from(raw)
+    if magic != MAGIC:
+        raise ValueError(f"bad magic {magic!r}")
+    start = HEADER_STRUCT.size
+    if len(raw) != start + header_len + payload_len:
+        raise ValueError(f"message of {len(raw)} bytes does not match its lengths ({header_len} + {payload_len})")
+    header = json.loads(raw[start:start + header_len])
+    return header, raw[start + header_len:]
+
+
+def end_message() -> bytes:
+    return encode_message({"event": END_EVENT})
 
 
 def _recv_exact(sock: socket.socket, n: int) -> bytes:
@@ -89,18 +120,30 @@ class ARStreamClient:
         sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
         return cls(sock)
 
-    def read_frame(self) -> Frame:
-        magic, header_len, payload_len = struct.unpack("<4sII", _recv_exact(self.sock, 12))
+    def read_message(self) -> bytes:
+        """One ARS1 message as the phone sent it (prefix, header and payload)."""
+        prefix = _recv_exact(self.sock, HEADER_STRUCT.size)
+        magic, header_len, payload_len = HEADER_STRUCT.unpack(prefix)
         if magic != MAGIC:
             raise ValueError(f"bad magic {magic!r}, stream out of sync")
-        header = json.loads(_recv_exact(self.sock, header_len))
-        jpeg = _recv_exact(self.sock, payload_len)
+        return prefix + _recv_exact(self.sock, header_len + payload_len)
+
+    def read_frame(self) -> Frame:
+        header, jpeg = decode_message(self.read_message())
         return parse_frame(header, jpeg)
 
     def __iter__(self):
         while True:
             try:
                 yield self.read_frame()
+            except ConnectionError:
+                return
+
+    def messages(self):
+        """Raw ARS1 messages until the phone closes the stream (for the relay: no decoding)."""
+        while True:
+            try:
+                yield self.read_message()
             except ConnectionError:
                 return
 

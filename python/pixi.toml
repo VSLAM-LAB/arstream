@@ -1,0 +1,31 @@
+# Conda package `arstream`: the Python client (phone connection over USB/Wi-Fi, viewer, recorder, ZeroMQ relay and
+# subscriber) and the `arstream` command, built by pixi-build from pyproject.toml (`pixi build --path python` from
+# the repository root; CI publishes it to prefix.dev/vslamlab on vX.Y tags).
+[workspace]
+channels = ["https://prefix.dev/conda-forge"]
+platforms = ["linux-64", "osx-arm64", "win-64"]
+preview = ["pixi-build"]
+
+[package]
+name = "arstream"
+version = "0.1.0"
+description = "ARStream Python client: iPhone RGB + intrinsics + ARKit pose over USB, Wi-Fi or ZeroMQ"
+authors = ["Alejandro Fontan <alejandro.fontan@qut.edu.au>"]
+license = "GPL-3.0-only"
+homepage = "https://github.com/VSLAM-LAB/arstream"
+repository = "https://github.com/VSLAM-LAB/arstream"
+
+[package.build]
+backend = { name = "pixi-build-python", version = "0.*" }
+
+[package.host-dependencies]
+python = ">=3.11"
+hatchling = "*"
+
+[package.run-dependencies]
+python = ">=3.11"
+numpy = "*"
+py-opencv = "*"
+pyzmq = "*"
+zeroconf = "*"
+rerun-sdk = "*"

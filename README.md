@@ -6,7 +6,8 @@ recording into a sequence of its `iphone` dataset with `pixi run record-iphone`.
 
 ```
 ios/ARStream/      iOS app (ARKit world tracking → JPEG + JSON header → TCP server on port 5555)
-python/arstream/   Mac client: USB via macOS usbmuxd, viewer (rerun), recorder
+python/arstream/   Mac client: USB via macOS usbmuxd, viewer (rerun), recorder, ZeroMQ relay + subscriber
+cpp/               header-only C++ subscriber (arstream/arstream.hpp) for SLAM systems running online
 ```
 
 ## Phone setup (once)
@@ -49,6 +50,41 @@ with ARStreamClient.usb() as client:
 The app only listens while it is in the foreground on an unlocked phone (iOS suspends it otherwise,
 and connections are refused). Over USB, `pixi run ios-launch` brings it to the front from the Mac.
 
+## Streaming to SLAM systems (relay)
+The phone serves one client at a time. `publish` connects to it once and re-publishes every frame
+over ZeroMQ PUB/SUB, so any number of subscribers (viewer, SLAM systems, your own code) run at once:
+
+```sh
+pixi run publish                            # phone over USB → tcp://*:5556
+pixi run publish --wifi --bind tcp://*:6000
+pixi run publish --calibration-yaml calibration.yaml   # VSLAM-LAB calibration from the first frame, written before it is published
+pixi run view --sub                         # viewer as a subscriber (default tcp://localhost:5556)
+pixi run record --sub my_scan               # recorder as a subscriber
+```
+
+Each ZeroMQ message is one ARS1 message (bytes untouched, see "Wire format"); the relay sends
+`{"event": "end"}` with an empty payload when it stops. Subscribers default to keeping only the
+newest frame (`ZMQ_CONFLATE`): a SLAM system slower than the stream skips frames instead of lagging.
+
+```python
+from arstream import Subscriber
+with Subscriber("tcp://localhost:5556") as sub:   # conflate=False, queue=30 to buffer instead
+    for frame in sub:                             # ends at the publisher's end-of-stream message
+        ...
+```
+
+```cpp
+#include <arstream/arstream.hpp>                  // cppzmq + nlohmann_json + OpenCV
+arstream::Subscriber sub("tcp://localhost:5556");
+arstream::Frame frame;
+while (sub.next(frame))                           // false at end of stream (or after sub.stop())
+    slam.Track(frame.image, frame.timestamp);     // frame.K, frame.T_world_camera, frame.tracking
+```
+
+Conda packages `arstream` (Python) and `libarstream` (C++ header + CMake config,
+`find_package(arstream)` → `arstream::arstream`) are published to prefix.dev/vslamlab on version
+tags; `pixi run build-packages` builds them locally into `output/`.
+
 ## Wi-Fi notes
 - Phone and Mac must be on the same network, and ARStream needs Local Network access
   (Settings → Privacy & Security → Local Network). Restart the app after granting it.
@@ -71,4 +107,6 @@ rgb/<timestamp>.jpg   rgb.txt   arkit_poses.txt (TUM format)   frames.jsonl (all
 
 ## Wire format
 Per frame, little-endian: `"ARS1" | u32 header_len | u32 jpeg_len | JSON header | JPEG`.
-See `ios/ARStream/ARStream/FrameStreamer.swift`.
+See `ios/ARStream/ARStream/FrameStreamer.swift`. The same message is what the relay publishes and
+what `frames.jsonl` records (one header per line); a header with an `"event"` key (`"end"`) is a
+control message with an empty payload.

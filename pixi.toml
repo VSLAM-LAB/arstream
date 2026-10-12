@@ -8,6 +8,10 @@ version = "0.1.0"
 [tasks]
 view = "arstream view"
 record = "arstream record"
+# Relay the phone's stream to ZeroMQ subscribers (tcp://*:5556): `arstream view --sub`, cpp/ subscribers, ...
+publish = "arstream publish"
+# Conda packages (python/: arstream, cpp/: libarstream) into output/, see .github/workflows/conda-package.yml
+build-packages = "pixi build --path python --output-dir output && pixi build --path cpp --output-dir output"
 # Build, sign, install and launch the app on the USB-connected iPhone.
 ios-install = "sh ios/install.sh"
 # Bring the (installed) app to the foreground on the USB-connected iPhone: iOS suspends its listener otherwise.
@@ -21,6 +25,7 @@ numpy = "*"
 opencv = "*"
 rerun-sdk = "*"
 zeroconf = ">=0.151.5,<0.152"
+pyzmq = "*"
 
 [pypi-dependencies]
 arstream = { path = "python", editable = true }

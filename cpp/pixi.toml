@@ -1,0 +1,33 @@
+# Conda package `libarstream`: the header-only C++ subscriber (include/arstream/arstream.hpp) with its CMake config,
+# built by pixi-build (`pixi build --path cpp` from the repository root; CI publishes it to prefix.dev/vslamlab on
+# vX.Y tags, see .github/workflows/conda-package.yml). A baseline adds `libarstream` to its host dependencies and
+#   find_package(arstream REQUIRED)
+#   target_link_libraries(<target> PRIVATE arstream::arstream)
+[workspace]
+channels = ["https://prefix.dev/conda-forge"]
+platforms = ["linux-64", "osx-arm64", "win-64"]
+preview = ["pixi-build"]
+
+[package]
+name = "libarstream"
+version = "0.1.0"
+description = "ARStream C++ subscriber: iPhone RGB + intrinsics + ARKit pose over ZeroMQ (header-only)"
+authors = ["Alejandro Fontan <alejandro.fontan@qut.edu.au>"]
+license = "GPL-3.0-only"
+homepage = "https://github.com/VSLAM-LAB/arstream"
+repository = "https://github.com/VSLAM-LAB/arstream"
+
+[package.build]
+backend = { name = "pixi-build-cmake", version = "0.*" }
+
+[package.host-dependencies]
+cppzmq = "*"
+nlohmann_json = "*"
+libopencv = "<5"
+
+# Header-only: the consumer's build needs the same headers and links the same libraries
+[package.run-dependencies]
+cppzmq = "*"
+zeromq = "*"
+nlohmann_json = "*"
+libopencv = "<5"
