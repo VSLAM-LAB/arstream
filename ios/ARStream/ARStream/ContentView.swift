@@ -7,9 +7,17 @@ final class StreamController: ObservableObject {
 
     @Published var serverStatus = "Starting…"
     @Published var stats = FrameStreamer.Stats()
-    @Published var autoFocus = false { didSet { runSession() } }
-    @Published var scale = 0.5 { didSet { streamer.scale = scale } }
-    @Published var maxFPS = 30.0 { didSet { streamer.maxFPS = maxFPS } }
+    // The picker choices persist across launches (UserDefaults): the Mac relaunches the app with
+    // `ios-launch` before every USB recording, and a relaunch must not silently reset the resolution.
+    @Published var autoFocus = UserDefaults.standard.bool(forKey: "autoFocus") {
+        didSet { UserDefaults.standard.set(autoFocus, forKey: "autoFocus"); runSession() }
+    }
+    @Published var scale = UserDefaults.standard.object(forKey: "scale") as? Double ?? 0.5 {
+        didSet { UserDefaults.standard.set(scale, forKey: "scale"); streamer.scale = scale }
+    }
+    @Published var maxFPS = UserDefaults.standard.object(forKey: "maxFPS") as? Double ?? 30.0 {
+        didSet { UserDefaults.standard.set(maxFPS, forKey: "maxFPS"); streamer.maxFPS = maxFPS }
+    }
 
     let session = ARSession()
     private let server = StreamServer(port: StreamController.port)
