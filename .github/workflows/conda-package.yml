@@ -89,9 +89,11 @@ jobs:
           pixi-version: v0.81.0
           run-install: false
 
+      # arstream is noarch (one identical file from the three builds, merged above); libarstream is per platform.
       # --skip-existing: a re-run after a partial upload never overwrites a published file
       - name: Upload to prefix.dev
         run: |
           ls -l packages
-          [ "$(ls packages/*.conda | wc -l)" -eq 6 ] || { echo "expected 6 packages (2 x 3 platforms)"; exit 1; }
+          [ "$(ls packages/arstream-*.conda | wc -l)" -eq 1 ] || { echo "expected 1 noarch arstream package"; exit 1; }
+          [ "$(ls packages/libarstream-*.conda | wc -l)" -eq 3 ] || { echo "expected 3 libarstream packages (one per platform)"; exit 1; }
           pixi exec rattler-build upload prefix --skip-existing --channel vslamlab/vslamlab packages/*.conda
