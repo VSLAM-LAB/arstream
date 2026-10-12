@@ -26,6 +26,8 @@ final class StreamController: ObservableObject {
     var wifiAddress: String { NetworkInfo.wifiIPv4Address() ?? "no Wi-Fi" }
 
     func start() {
+        // Never auto-lock while streaming: iOS suspends the app (and closes the stream) when the screen locks.
+        UIApplication.shared.isIdleTimerDisabled = true
         server.onStatusChange = { [weak self] in self?.serverStatus = $0 }
         streamer.onStats = { [weak self] in self?.stats = $0 }
         streamer.scale = scale

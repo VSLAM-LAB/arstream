@@ -6,7 +6,5 @@
 	<array>
 		<string>_arstream._tcp</string>
 	</array>
-	<key>UIApplicationIdleTimerDisabled</key>
-	<true/>
 </dict>
 </plist>
