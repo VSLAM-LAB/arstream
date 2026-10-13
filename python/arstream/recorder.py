@@ -1,10 +1,12 @@
 """Writes a stream to disk in a TUM-RGB-D-like layout.
 
 out_dir/
-  rgb/<timestamp>.jpg     original JPEGs from the phone (not re-encoded)
-  rgb.txt                 "timestamp rgb/<timestamp>.jpg"
-  arkit_poses.txt         TUM trajectory: "timestamp tx ty tz qx qy qz qw" (camera-to-world, OpenCV camera)
-  frames.jsonl            full per-frame header: intrinsics, ARKit pose, tracking state, ...
+  rgb/<timestamp>.jpg         original JPEGs from the phone (not re-encoded)
+  depth/<timestamp>.png       LiDAR phones: ARKit depth, 16-bit PNG in millimetres at its native 256x192 (0 = none)
+  confidence/<timestamp>.png  LiDAR phones: ARKit confidence, 8-bit PNG (0 low, 1 medium, 2 high)
+  rgb.txt                     "timestamp rgb/<timestamp>.jpg"
+  arkit_poses.txt             TUM trajectory: "timestamp tx ty tz qx qy qz qw" (camera-to-world, OpenCV camera)
+  frames.jsonl                full per-frame header: intrinsics, ARKit pose, tracking state, file names, ...
 """
 
 import json
@@ -56,8 +58,21 @@ class Recorder:
         self._poses.write(f"{frame.timestamp:.6f} " + " ".join(f"{v:.7f}" for v in (*t, *q)) + "\n")
 
         record = {**frame.header, "file": name, "T_world_camera_opencv": frame.T_world_camera.ravel().tolist()}
+        if frame.depth_png is not None:
+            depth_name = f"depth/{frame.timestamp:.6f}.png"
+            self._write(depth_name, frame.depth_png)
+            record["depth_file"] = depth_name
+            if frame.confidence_png:
+                confidence_name = f"confidence/{frame.timestamp:.6f}.png"
+                self._write(confidence_name, frame.confidence_png)
+                record["confidence_file"] = confidence_name
         self._frames.write(json.dumps(record) + "\n")
         self.count += 1
+
+    def _write(self, name: str, data: bytes) -> None:
+        path = self.out_dir / name
+        path.parent.mkdir(exist_ok=True)  # depth/ and confidence/ only exist for recordings that have them
+        path.write_bytes(data)
 
     def close(self):
         for f in (self._rgb, self._poses, self._frames):

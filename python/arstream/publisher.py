@@ -42,24 +42,31 @@ class Publisher:
         self.close()
 
 
+DEPTH_FACTOR = 1000.0  # depth PNGs are millimetres: metres = value / 1000
+
+
 def write_vslamlab_calibration(path, header: dict, fps: float) -> None:
     """VSLAM-LAB calibration.yaml (one pinhole rgb_0 camera, body frame = camera) from a frame header:
     the format Datasets/DatasetVSLAMLAB_calibration.py writes, so VSLAM-LAB baselines can be started on
-    the stream with calibration_yaml:<path>."""
+    the stream with calibration_yaml:<path>. A frame with depth gives an rgb+depth entry (depth_0, in
+    millimetres, upsampled to the image size by the consumer)."""
     K = header["K"]
     fx, fy, cx, cy = K[0], K[4], K[2], K[5]
     identity = ", ".join(f"{v:.13f}" for v in (1.0, 0, 0, 0, 0, 1.0, 0, 0, 0, 0, 1.0, 0, 0, 0, 0, 1.0))
+    with_depth = bool(header.get("depth"))
     lines = [
         "%YAML 1.2",
         "---",
         "cameras:",
         "  - {cam_name: rgb_0,",
-        "     cam_type: rgb,",
+        f"     cam_type: {'rgb+depth' if with_depth else 'rgb'},",
+        *(["     depth_name: depth_0,"] if with_depth else []),
         "     cam_model: pinhole,",
         f"     focal_length: [{fx}, {fy}],",
         f"     principal_point: [{cx}, {cy}],",
         f"     image_dimension: [{header['width']}, {header['height']}],",
         f"     fps: {float(fps)},",
+        *([f"     depth_factor: {DEPTH_FACTOR},"] if with_depth else []),
         f"     T_BS: [{identity}] # Sensor extrinsics wrt. the body-frame.",
         "    }",
         "",

@@ -6,9 +6,13 @@
 //   while (sub.next(frame))           // false at the publisher's end-of-stream message (or after stop())
 //       slam.Track(frame.image, frame.timestamp);
 //
-// ARS1 message, little-endian: "ARS1" | u32 header_len | u32 payload_len | JSON header | JPEG.
+// ARS1 message, little-endian: "ARS1" | u32 header_len | u32 payload_len | JSON header | payload.
 // Header: seq, timestamp (s, phone clock), width, height, K (3x3 row-major), T_world_camera (4x4 row-major,
 // ARKit camera axes), tracking, exposure_duration. A header with "event" ("end") is a control message.
+// The payload is the JPEG; on LiDAR phones with depth on it is followed by the depth map (16-bit PNG,
+// millimetres, 0 = no measurement, ARKit's native 256x192 aligned with the image) and the confidence map
+// (8-bit PNG, 0 low / 1 medium / 2 high), described by header "jpeg_size" and "depth" {width, height, size,
+// confidence_size, ...}.
 #pragma once
 
 #include <atomic>
@@ -20,6 +24,7 @@
 #include <nlohmann/json.hpp>
 #include <opencv2/core.hpp>
 #include <opencv2/imgcodecs.hpp>
+#include <opencv2/imgproc.hpp>
 #include <zmq.hpp>
 
 namespace arstream {
@@ -37,6 +42,24 @@ struct Frame {
     cv::Matx44d T_world_camera;       // camera-to-world, OpenCV camera axes (x right, y down, z forward)
     std::string tracking;             // "normal" when ARKit's pose is reliable
     nlohmann::json header;            // the full JSON header
+    cv::Mat depth;                    // CV_16UC1 millimetres at ARKit's depth resolution (0 = none); empty without LiDAR
+    cv::Mat confidence;               // CV_8UC1 ARKit confidence (0 low, 1 medium, 2 high); empty without LiDAR
+
+    bool hasDepth() const { return !depth.empty(); }
+
+    // Depth upsampled (nearest neighbour) to the image size, pixels below minConfidence set to 0.
+    cv::Mat depthResized(int minConfidence = 0) const {
+        if (depth.empty())
+            return {};
+        cv::Mat masked = depth;
+        if (minConfidence > 0 && !confidence.empty()) {
+            masked = cv::Mat::zeros(depth.size(), depth.type());
+            depth.copyTo(masked, confidence >= minConfidence);
+        }
+        cv::Mat out;
+        cv::resize(masked, out, cv::Size(width, height), 0, 0, cv::INTER_NEAREST);
+        return out;
+    }
 };
 
 struct Message {
@@ -85,10 +108,26 @@ inline Frame toFrame(const Message& m) {
     f.K = cv::Matx33d(K.data());
     f.T_world_camera = arkitToOpenCV(cv::Matx44d(T.data()));
     f.tracking = m.header.value("tracking", "");
-    const cv::Mat jpeg(1, int(m.payload_size), CV_8UC1, const_cast<uint8_t*>(m.payload));
+    size_t jpegSize = m.payload_size;
+    if (m.header.contains("depth"))
+        jpegSize = m.header.at("jpeg_size").get<size_t>();
+    const cv::Mat jpeg(1, int(jpegSize), CV_8UC1, const_cast<uint8_t*>(m.payload));
     f.image = cv::imdecode(jpeg, cv::IMREAD_COLOR);
     if (f.image.empty())
         throw std::runtime_error("arstream: could not decode the JPEG payload");
+    if (m.header.contains("depth")) {
+        const auto& d = m.header.at("depth");
+        const size_t depthSize = d.at("size").get<size_t>();
+        const size_t confidenceSize = d.value("confidence_size", size_t(0));
+        if (jpegSize + depthSize + confidenceSize > m.payload_size)
+            throw std::runtime_error("arstream: depth payload sizes exceed the message");
+        const cv::Mat depthPNG(1, int(depthSize), CV_8UC1, const_cast<uint8_t*>(m.payload + jpegSize));
+        f.depth = cv::imdecode(depthPNG, cv::IMREAD_UNCHANGED);
+        if (confidenceSize > 0) {
+            const cv::Mat confidencePNG(1, int(confidenceSize), CV_8UC1, const_cast<uint8_t*>(m.payload + jpegSize + depthSize));
+            f.confidence = cv::imdecode(confidencePNG, cv::IMREAD_UNCHANGED);
+        }
+    }
     return f;
 }
 

@@ -49,8 +49,8 @@ class Subscriber:
         message = self.read_message()
         if message is None:
             return None
-        header, jpeg = decode_message(message)
-        return parse_frame(header, jpeg)
+        header, payload = decode_message(message)
+        return parse_frame(header, payload)
 
     def __iter__(self):
         while (frame := self.read_frame()) is not None:

@@ -4,6 +4,11 @@ The ARS1 message is the one schema on every leg: phone -> Mac (this client), Mac
 (publisher.py / subscriber.py, one ZeroMQ message per ARS1 message, bytes untouched) and the
 recording's frames.jsonl (one header per line). A message whose header carries "event" (e.g.
 {"event": "end"}, empty payload) is a control message, not a frame.
+
+The payload is the JPEG. On LiDAR phones with depth enabled it is followed by ARKit's depth map
+(16-bit PNG, millimetres, 0 = no measurement, native 256x192 aligned with the image) and confidence
+map (8-bit PNG, 0 low / 1 medium / 2 high); the header then has "jpeg_size" and a "depth" block
+(width, height, encoding "png16", unit "mm", size, confidence_encoding "png8", confidence_size).
 """
 
 import json
@@ -35,6 +40,8 @@ class Frame:
     tracking: str                  # ARKit tracking state, "normal" when the pose is reliable
     jpeg: bytes = field(repr=False)
     header: dict = field(repr=False)
+    depth_png: bytes | None = field(default=None, repr=False)        # LiDAR phones with depth on
+    confidence_png: bytes | None = field(default=None, repr=False)
 
     @cached_property
     def image(self) -> np.ndarray:
@@ -48,6 +55,35 @@ class Frame:
     @property
     def height(self) -> int:
         return self.header["height"]
+
+    @property
+    def has_depth(self) -> bool:
+        return self.depth_png is not None
+
+    @cached_property
+    def depth(self) -> np.ndarray | None:
+        """uint16 depth in millimetres at ARKit's native resolution (0 = no measurement), None without LiDAR."""
+        if self.depth_png is None:
+            return None
+        return cv2.imdecode(np.frombuffer(self.depth_png, np.uint8), cv2.IMREAD_UNCHANGED)
+
+    @cached_property
+    def confidence(self) -> np.ndarray | None:
+        """uint8 ARKit confidence (0 low, 1 medium, 2 high) at the depth resolution, None without LiDAR."""
+        if not self.confidence_png:
+            return None
+        return cv2.imdecode(np.frombuffer(self.confidence_png, np.uint8), cv2.IMREAD_UNCHANGED)
+
+    def depth_resized(self, width: int | None = None, height: int | None = None, min_confidence: int = 0) -> np.ndarray | None:
+        """Depth upsampled (nearest neighbour) to the image size, or to width x height; pixels below
+        min_confidence are set to 0."""
+        depth = self.depth
+        if depth is None:
+            return None
+        if min_confidence > 0 and self.confidence is not None:
+            depth = np.where(self.confidence >= min_confidence, depth, 0).astype(np.uint16)
+        size = (width or self.width, height or self.height)
+        return cv2.resize(depth, size, interpolation=cv2.INTER_NEAREST)
 
 
 def encode_message(header: dict, payload: bytes = b"") -> bytes:
@@ -85,8 +121,21 @@ def _recv_exact(sock: socket.socket, n: int) -> bytes:
     return bytes(buf)
 
 
-def parse_frame(header: dict, jpeg: bytes) -> Frame:
+def split_payload(header: dict, payload: bytes) -> tuple[bytes, bytes | None, bytes | None]:
+    """(jpeg, depth_png, confidence_png) of a message payload; the last two are None without a depth block."""
+    depth = header.get("depth")
+    if not depth:
+        return payload, None, None
+    jpeg_size = header["jpeg_size"]
+    depth_end = jpeg_size + depth["size"]
+    confidence_size = depth.get("confidence_size", 0)
+    return (payload[:jpeg_size], payload[jpeg_size:depth_end],
+            payload[depth_end:depth_end + confidence_size] if confidence_size else None)
+
+
+def parse_frame(header: dict, payload: bytes) -> Frame:
     T_arkit = np.array(header["T_world_camera"], dtype=np.float64).reshape(4, 4)
+    jpeg, depth_png, confidence_png = split_payload(header, payload)
     return Frame(
         seq=header["seq"],
         timestamp=header["timestamp"],
@@ -95,6 +144,8 @@ def parse_frame(header: dict, jpeg: bytes) -> Frame:
         tracking=header["tracking"],
         jpeg=jpeg,
         header=header,
+        depth_png=depth_png,
+        confidence_png=confidence_png,
     )
 
 
@@ -129,8 +180,8 @@ class ARStreamClient:
         return prefix + _recv_exact(self.sock, header_len + payload_len)
 
     def read_frame(self) -> Frame:
-        header, jpeg = decode_message(self.read_message())
-        return parse_frame(header, jpeg)
+        header, payload = decode_message(self.read_message())
+        return parse_frame(header, payload)
 
     def __iter__(self):
         while True:

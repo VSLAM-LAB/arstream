@@ -3,7 +3,7 @@
 include(CMakeFindDependencyMacro)
 find_dependency(cppzmq)
 find_dependency(nlohmann_json)
-find_dependency(OpenCV COMPONENTS core imgcodecs)
+find_dependency(OpenCV COMPONENTS core imgcodecs imgproc)
 
 include("${CMAKE_CURRENT_LIST_DIR}/arstreamTargets.cmake")
 check_required_components(arstream)

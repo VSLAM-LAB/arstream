@@ -6,7 +6,7 @@ project(arstream VERSION 0.1.0 LANGUAGES CXX)
 #   target_link_libraries(<target> PRIVATE arstream::arstream)
 find_package(cppzmq REQUIRED)
 find_package(nlohmann_json REQUIRED)
-find_package(OpenCV REQUIRED COMPONENTS core imgcodecs)
+find_package(OpenCV REQUIRED COMPONENTS core imgcodecs imgproc)
 
 add_library(arstream INTERFACE)
 add_library(arstream::arstream ALIAS arstream)
@@ -14,7 +14,7 @@ target_compile_features(arstream INTERFACE cxx_std_17)
 target_include_directories(arstream INTERFACE
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
     $<INSTALL_INTERFACE:include>)
-target_link_libraries(arstream INTERFACE cppzmq nlohmann_json::nlohmann_json opencv_core opencv_imgcodecs)
+target_link_libraries(arstream INTERFACE cppzmq nlohmann_json::nlohmann_json opencv_core opencv_imgcodecs opencv_imgproc)
 
 include(GNUInstallDirs)
 include(CMakePackageConfigHelpers)

@@ -18,6 +18,11 @@ final class StreamController: ObservableObject {
     @Published var maxFPS = UserDefaults.standard.object(forKey: "maxFPS") as? Double ?? 30.0 {
         didSet { UserDefaults.standard.set(maxFPS, forKey: "maxFPS"); streamer.maxFPS = maxFPS }
     }
+    // LiDAR depth (ARKit sceneDepth) alongside every frame, on devices that have it.
+    let depthSupported = ARWorldTrackingConfiguration.supportsFrameSemantics(.sceneDepth)
+    @Published var depth = UserDefaults.standard.object(forKey: "depth") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(depth, forKey: "depth"); streamer.depthEnabled = depth; runSession() }
+    }
 
     let session = ARSession()
     private let server = StreamServer(port: StreamController.port)
@@ -32,6 +37,7 @@ final class StreamController: ObservableObject {
         streamer.onStats = { [weak self] in self?.stats = $0 }
         streamer.scale = scale
         streamer.maxFPS = maxFPS
+        streamer.depthEnabled = depth
         session.delegate = streamer
         do {
             try server.start()
@@ -46,6 +52,9 @@ final class StreamController: ObservableObject {
         config.worldAlignment = .gravity
         // Fixed focus keeps the intrinsics stable, which most SLAM systems assume.
         config.isAutoFocusEnabled = autoFocus
+        if depthSupported && depth {
+            config.frameSemantics.insert(.sceneDepth)  // raw per-frame LiDAR depth, not the temporally smoothed one
+        }
         session.run(config)
     }
 }
@@ -71,6 +80,10 @@ struct ContentView: View {
                 Text("Tracking: \(controller.stats.tracking)")
                     .font(.caption.monospaced())
                     .foregroundStyle(controller.stats.tracking == "normal" ? .green : .orange)
+                if controller.depthSupported {
+                    Text("Depth: \(controller.stats.depth)")
+                        .font(.caption.monospaced())
+                }
 
                 Picker("Resolution", selection: $controller.scale) {
                     Text("1920×1440").tag(1.0)
@@ -87,6 +100,9 @@ struct ContentView: View {
                 .pickerStyle(.segmented)
 
                 Toggle("Autofocus", isOn: $controller.autoFocus)
+                if controller.depthSupported {
+                    Toggle("Depth (LiDAR)", isOn: $controller.depth)
+                }
             }
             .padding()
             .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))

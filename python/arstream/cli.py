@@ -60,7 +60,8 @@ class RateMeter:
 
 def status_line(frame: Frame, fps: float) -> str:
     t = frame.T_world_camera[:3, 3]
-    return (f"{fps:5.1f} fps  {frame.width}x{frame.height}  "
+    depth = f"  depth {frame.header['depth']['width']}x{frame.header['depth']['height']}" if frame.has_depth else ""
+    return (f"{fps:5.1f} fps  {frame.width}x{frame.height}{depth}  "
             f"fx={frame.K[0, 0]:.1f}  pos=[{t[0]:+.3f} {t[1]:+.3f} {t[2]:+.3f}]  {frame.tracking}")
 
 
@@ -84,6 +85,16 @@ class RerunLogger:
             image_plane_distance=0.1,
         ))
         rr.log("world/camera/image", rr.EncodedImage(contents=frame.jpeg, media_type="image/jpeg"))
+        if frame.has_depth:
+            # Depth under its own pinhole at the native depth resolution (K scaled down): rerun back-projects it
+            depth = frame.depth
+            dh, dw = depth.shape[:2]
+            K_depth = frame.K.copy()
+            K_depth[0] *= dw / frame.width
+            K_depth[1] *= dh / frame.height
+            rr.log("world/camera/depth", rr.Pinhole(image_from_camera=K_depth, resolution=[dw, dh],
+                                                     camera_xyz=rr.ViewCoordinates.RDF, image_plane_distance=0.1))
+            rr.log("world/camera/depth", rr.DepthImage(depth, meter=1000.0))
         rr.log("tracking", rr.TextLog(frame.tracking))
 
         self.positions.append(T[:3, 3].copy())

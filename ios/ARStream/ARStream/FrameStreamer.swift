@@ -1,10 +1,12 @@
 import ARKit
 import CoreImage
+import ImageIO
+import UniformTypeIdentifiers
 
 /// Encodes ARFrames and sends them through a `StreamServer`.
 ///
 /// Wire format (all integers little-endian), one message per frame:
-///   magic "ARS1" | u32 header_len | u32 payload_len | header (UTF-8 JSON) | payload (JPEG)
+///   magic "ARS1" | u32 header_len | u32 payload_len | header (UTF-8 JSON) | payload
 ///
 /// Header fields:
 ///   seq, timestamp (s, device uptime clock), width, height,
@@ -12,6 +14,12 @@ import CoreImage
 ///   T_world_camera (4x4 row-major, ARKit convention: camera x right, y up, z backward;
 ///                   world gravity-aligned, y up),
 ///   tracking (string), exposure_duration (s)
+///
+/// The payload is the JPEG. On LiDAR devices with depth enabled it is followed by the depth map
+/// (16-bit grayscale PNG, millimetres, 0 = no measurement, ARKit's native 256x192 aligned with the
+/// image) and ARKit's confidence map (8-bit PNG, 0 low / 1 medium / 2 high); the header then
+/// carries `jpeg_size` and `depth: {width, height, encoding: "png16", unit: "mm", size,
+/// confidence_encoding: "png8", confidence_size}` so clients can split the payload.
 ///
 /// Only one frame is in flight at a time: frames arriving while the previous one is still
 /// being encoded or sent are dropped, which keeps latency low when the link is slow.
@@ -22,11 +30,20 @@ final class FrameStreamer: NSObject, ARSessionDelegate {
         var megabitsPerSecond: Double = 0
         var tracking: String = "-"
         var resolution: String = "-"
+        var depth: String = "-"
+    }
+
+    private struct EncodedDepth {
+        let depthPNG: Data
+        let confidencePNG: Data
+        let width: Int
+        let height: Int
     }
 
     var scale: Double = 0.5
     var jpegQuality: Double = 0.8
     var maxFPS: Double = 30
+    var depthEnabled = true   // sends frame.sceneDepth when the session provides it (LiDAR devices)
     var onStats: ((Stats) -> Void)?
 
     private let server: StreamServer
@@ -75,7 +92,7 @@ final class FrameStreamer: NSObject, ARSessionDelegate {
         let fullH = CVPixelBufferGetHeight(pixelBuffer)
         let outW = Int((Double(fullW) * scale).rounded())
         let outH = Int((Double(fullH) * scale).rounded())
-        let header: [String: Any] = [
+        var header: [String: Any] = [
             "seq": seq,
             "timestamp": frame.timestamp,
             "width": outW,
@@ -89,10 +106,35 @@ final class FrameStreamer: NSObject, ARSessionDelegate {
         ]
         stats.resolution = "\(outW)x\(outH)"
         let quality = jpegQuality
+        // ARDepthData holds its own pixel buffers, so keeping it does not retain the ARFrame.
+        let depthData = depthEnabled ? frame.sceneDepth : nil
+        if let depthData {
+            stats.depth = "\(CVPixelBufferGetWidth(depthData.depthMap))x\(CVPixelBufferGetHeight(depthData.depthMap))"
+        } else {
+            stats.depth = depthEnabled ? "none" : "off"
+        }
 
         encodeQueue.async {
-            guard let jpeg = self.encodeJPEG(pixelBuffer, width: outW, height: outH, quality: quality),
-                  let message = Self.makeMessage(header: header, payload: jpeg) else {
+            guard let jpeg = self.encodeJPEG(pixelBuffer, width: outW, height: outH, quality: quality) else {
+                self.finishSend(bytes: 0)
+                return
+            }
+            var payload = jpeg
+            if let depthData, let depth = Self.encodeDepth(depthData) {
+                header["jpeg_size"] = jpeg.count
+                header["depth"] = [
+                    "width": depth.width,
+                    "height": depth.height,
+                    "encoding": "png16",
+                    "unit": "mm",
+                    "size": depth.depthPNG.count,
+                    "confidence_encoding": "png8",
+                    "confidence_size": depth.confidencePNG.count,
+                ]
+                payload.append(depth.depthPNG)
+                payload.append(depth.confidencePNG)
+            }
+            guard let message = Self.makeMessage(header: header, payload: payload) else {
                 self.finishSend(bytes: 0)
                 return
             }
@@ -125,6 +167,64 @@ final class FrameStreamer: NSObject, ARSessionDelegate {
         }
         let options = [CIImageRepresentationOption(rawValue: kCGImageDestinationLossyCompressionQuality as String): quality]
         return ciContext.jpegRepresentation(of: image, colorSpace: colorSpace, options: options)
+    }
+
+    /// Depth as a 16-bit grayscale PNG in millimetres (0 where ARKit has no measurement) and the confidence
+    /// map as an 8-bit PNG, both at ARKit's native depth resolution.
+    private static func encodeDepth(_ depth: ARDepthData) -> EncodedDepth? {
+        let map = depth.depthMap
+        guard CVPixelBufferGetPixelFormatType(map) == kCVPixelFormatType_DepthFloat32 else { return nil }
+        let width = CVPixelBufferGetWidth(map), height = CVPixelBufferGetHeight(map)
+
+        CVPixelBufferLockBaseAddress(map, .readOnly)
+        defer { CVPixelBufferUnlockBaseAddress(map, .readOnly) }
+        guard let base = CVPixelBufferGetBaseAddress(map) else { return nil }
+        let bytesPerRow = CVPixelBufferGetBytesPerRow(map)
+        var millimetres = [UInt16](repeating: 0, count: width * height)
+        for y in 0..<height {
+            let row = base.advanced(by: y * bytesPerRow).assumingMemoryBound(to: Float32.self)
+            for x in 0..<width {
+                let metres = row[x]
+                if metres.isFinite && metres > 0 {
+                    millimetres[y * width + x] = UInt16(min(metres * 1000, 65535)).bigEndian  // PNG samples are big-endian
+                }
+            }
+        }
+        let depthBytes = millimetres.withUnsafeBufferPointer { Data(buffer: $0) }
+        guard let depthPNG = Self.encodePNG(depthBytes, width: width, height: height, bitsPerComponent: 16) else { return nil }
+
+        var confidencePNG = Data()
+        if let confidence = depth.confidenceMap, CVPixelBufferGetPixelFormatType(confidence) == kCVPixelFormatType_OneComponent8 {
+            CVPixelBufferLockBaseAddress(confidence, .readOnly)
+            defer { CVPixelBufferUnlockBaseAddress(confidence, .readOnly) }
+            if let confBase = CVPixelBufferGetBaseAddress(confidence) {
+                let confBytesPerRow = CVPixelBufferGetBytesPerRow(confidence)
+                var levels = Data(count: width * height)
+                for y in 0..<height {
+                    levels.replaceSubrange(y * width..<(y + 1) * width,
+                                           with: Data(bytes: confBase.advanced(by: y * confBytesPerRow), count: width))
+                }
+                confidencePNG = Self.encodePNG(levels, width: width, height: height, bitsPerComponent: 8) ?? Data()
+            }
+        }
+        return EncodedDepth(depthPNG: depthPNG, confidencePNG: confidencePNG, width: width, height: height)
+    }
+
+    /// Grayscale PNG (8 or 16 bits per sample) from packed samples, via ImageIO.
+    private static func encodePNG(_ samples: Data, width: Int, height: Int, bitsPerComponent: Int) -> Data? {
+        guard let provider = CGDataProvider(data: samples as CFData) else { return nil }
+        let byteOrder: CGBitmapInfo = bitsPerComponent == 16 ? .byteOrder16Big : []
+        guard let image = CGImage(width: width, height: height, bitsPerComponent: bitsPerComponent,
+                                  bitsPerPixel: bitsPerComponent, bytesPerRow: width * bitsPerComponent / 8,
+                                  space: CGColorSpaceCreateDeviceGray(),
+                                  bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.none.rawValue | byteOrder.rawValue),
+                                  provider: provider, decode: nil, shouldInterpolate: false, intent: .defaultIntent)
+        else { return nil }
+        let out = NSMutableData()
+        guard let destination = CGImageDestinationCreateWithData(out, UTType.png.identifier as CFString, 1, nil) else { return nil }
+        CGImageDestinationAddImage(destination, image, nil)
+        guard CGImageDestinationFinalize(destination) else { return nil }
+        return out as Data
     }
 
     private func publishStatsIfDue() {
