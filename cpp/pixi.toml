@@ -10,7 +10,7 @@ preview = ["pixi-build"]
 
 [package]
 name = "libarstream"
-version = "0.1.0"
+version = "0.2.0"
 description = "ARStream C++ subscriber: iPhone RGB + intrinsics + ARKit pose over ZeroMQ (header-only)"
 authors = ["Alejandro Fontan <alejandro.fontan@qut.edu.au>"]
 license = "GPL-3.0-only"

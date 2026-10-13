@@ -8,7 +8,7 @@ preview = ["pixi-build"]
 
 [package]
 name = "arstream"
-version = "0.1.0"
+version = "0.2.0"
 description = "ARStream Python client: iPhone RGB + intrinsics + ARKit pose over USB, Wi-Fi or ZeroMQ"
 authors = ["Alejandro Fontan <alejandro.fontan@qut.edu.au>"]
 license = "GPL-3.0-only"
