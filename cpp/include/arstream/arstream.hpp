@@ -51,10 +51,14 @@ struct Frame {
     cv::Mat depthResized(int minConfidence = 0) const {
         if (depth.empty())
             return {};
-        cv::Mat masked = depth;
+        // `masked` must never alias `depth` when it is assigned a MatExpr: OpenCV evaluates the expression in place
+        // into a Mat of matching size, which would zero the frame's own depth map (and every later read of it).
+        cv::Mat masked;
         if (minConfidence > 0 && !confidence.empty()) {
-            masked = cv::Mat::zeros(depth.size(), depth.type());
+            masked = cv::Mat::zeros(depth.size(), depth.type());  // fresh buffer: masked is empty here
             depth.copyTo(masked, confidence >= minConfidence);
+        } else {
+            masked = depth;
         }
         cv::Mat out;
         cv::resize(masked, out, cv::Size(width, height), 0, 0, cv::INTER_NEAREST);
