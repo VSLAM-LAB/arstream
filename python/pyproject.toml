@@ -1,6 +1,6 @@
 [project]
 name = "arstream"
-version = "0.2.1"
+version = "0.2.2"
 description = "Receive RGB + intrinsics + ARKit pose streamed from an iPhone"
 requires-python = ">=3.11"
 dependencies = []

@@ -10,7 +10,7 @@ preview = ["pixi-build"]
 
 [package]
 name = "libarstream"
-version = "0.2.1"
+version = "0.2.2"
 description = "ARStream C++ subscriber: iPhone RGB + intrinsics + ARKit pose over ZeroMQ (header-only)"
 authors = ["Alejandro Fontan <alejandro.fontan@qut.edu.au>"]
 license = "GPL-3.0-only"
@@ -20,14 +20,20 @@ repository = "https://github.com/VSLAM-LAB/arstream"
 [package.build]
 backend = { name = "pixi-build-cmake", version = "0.*" }
 
+[package.build.config]
+# The smoke test executable is not packaged: building it would make OpenCV a host dependency, whose run-export
+# pins the package to the OpenCV version it was built with (0.2.1 required libopencv 4.13 and could not be
+# installed next to a baseline pinning 4.12). The consumer brings its own OpenCV through find_dependency(OpenCV)
+# in the CMake config; CI compiles the header against a fresh environment instead.
+extra-args = ["-DARSTREAM_BUILD_TESTS=OFF"]
+
 [package.host-dependencies]
 cppzmq = "*"
 nlohmann_json = "*"
-libopencv = "<5"
 
-# Header-only: the consumer's build needs the same headers and links the same libraries
+# Header-only: the consumer's build needs the same headers and links the same libraries (OpenCV comes from the
+# consumer, see above)
 [package.run-dependencies]
 cppzmq = "*"
 zeromq = "*"
 nlohmann_json = "*"
-libopencv = "<5"

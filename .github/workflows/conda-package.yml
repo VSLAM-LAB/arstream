@@ -58,11 +58,16 @@ jobs:
           pixi build --clean --path cpp --output-dir channel/${{ matrix.platform }}
           pixi exec -c https://prefix.dev/conda-forge -s rattler-index -- rattler-index fs channel
 
-      # Fresh environments from the local channel: the command is packaged and the header compiles
+      # Fresh environments from the local channel: the command is packaged, and the header compiles against the
+      # consumer's own OpenCV (not a dependency of libarstream, see cpp/pixi.toml); the compile check skips Windows
       - name: Test
         run: |
           pixi exec -c "${{ github.workspace }}/channel" -c https://prefix.dev/conda-forge -s arstream -- arstream --help
-          pixi exec -c "${{ github.workspace }}/channel" -c https://prefix.dev/conda-forge -s libarstream -- arstream_subscribe --help
+          if [ "$RUNNER_OS" != "Windows" ]; then
+            printf '#include <arstream/arstream.hpp>\nint main() { arstream::Frame f; return f.hasDepth() ? 1 : 0; }\n' > header_check.cpp
+            pixi exec -c "${{ github.workspace }}/channel" -c https://prefix.dev/conda-forge -s libarstream -s "libopencv<5" -s cxx-compiler -- \
+              sh -c '"${CXX:-c++}" -std=c++17 -fsyntax-only -I"$CONDA_PREFIX/include" -I"$CONDA_PREFIX/include/opencv4" header_check.cpp'
+          fi
 
       - uses: actions/upload-artifact@v7
         with:
